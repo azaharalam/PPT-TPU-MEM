@@ -1,0 +1,3 @@
+[submodule "scalesim"]
+	path = scalesim
+	url = https://github.com/scalesim-project/scale-sim-v2.git
