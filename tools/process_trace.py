@@ -49,8 +49,8 @@ class TraceProcessor:
 
                 for idx, cell in enumerate(row_vals[1:]):
                     try:
-                        addr_f = int(float(cell))
-                        if addr_f < 0:continue
+                        addr = int(float(cell))
+                        if addr < 0:continue
                         addr -= self.OFFSETS[tag] #Substracting the offset
                         if addr < 0:continue
                     except:
@@ -64,7 +64,12 @@ class TraceProcessor:
                     yield (cycle, tag, r, c, line, is_write)
 
     def merge_traces_for_layer(self, layer_dir):
-
+        old_csv = os.path.join(layer_dir, "UNIFIED_TRACE.csv")
+        old_npy = os.path.join(layer_dir, "UNIFIED_TRACE.npy")
+        if os.path.exists(old_csv):
+            os.remove(old_csv)
+        if os.path.exists(old_npy):
+            os.remove(old_npy)
         out_csv = os.path.join(layer_dir, "UNIFIED_TRACE.csv")
         os.makedirs(layer_dir, exist_ok=True)
 
@@ -83,37 +88,31 @@ class TraceProcessor:
 
         print(f"Merged DRAM traces → {out_csv}")
         return out_csv
-
+    
     def interleave_rows_for_layer(self, unified_csv):
-        """
-        Read the UNIFIED_TRACE.csv (cycle,op,row,col,line,is_write),
-        bucket by 'row', then round-robin interleave across ARRAY_HEIGHT rows.
-        Save the resulting 1D cache-line address stream as UNIFIED_TRACE.npy.
-        Returns the full path to the created .npy file.
-        """
-        layer_dir = os.path.dirname(unified_csv)
-
         buckets = defaultdict(list)
         with open(unified_csv) as f:
             reader = csv.reader(f)
-            next(reader)  # skip header
+            next(reader)  
             for cycle, op, row, col, line, is_write in reader:
                 line_int = int(line)
-                if line_int >= 0:
-                    buckets[int(row)].append(line_int)
+                if line_int < 0:
+                    continue
+                buckets[int(row)].append(line_int)
 
-        #  Round-robin interleaving across ARRAY_HEIGHT
         idx = [0] * self.ARRAY_HEIGHT
-        output_stream = []
+        interleaved_pairs = []  # will hold (row_id, line_addr) tuples
         while any(idx[r] < len(buckets[r]) for r in range(self.ARRAY_HEIGHT)):
             for r in range(self.ARRAY_HEIGHT):
                 if idx[r] < len(buckets[r]):
-                    output_stream.append(buckets[r][idx[r]])
+                    line_addr = buckets[r][idx[r]]
+                    interleaved_pairs.append((r, line_addr))
                     idx[r] += 1
 
+        # Convert to a 2D NumPy array of shape (N,2)
+        arr = np.array(interleaved_pairs, dtype=np.uint32)  # now shape == (N, 2)
         out_npy = unified_csv.replace(".csv", ".npy")
-        np.save(out_npy, np.array(output_stream, dtype=np.uint32))
-        print(f"Interleaved .npy → {out_npy}")
+        np.save(out_npy, arr)
         return out_npy
 
     def run(self):
